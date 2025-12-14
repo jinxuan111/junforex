@@ -5,9 +5,9 @@
 
 # MT5账户配置（保持你的）
 MT5_CONFIG = {
-    'login': 100007683,
-    'password': '@7CiZpHr',
-    'server': 'MetaQuotes-Demo',
+    'login': 15617982,
+    'password': '3IGs*zBY',
+    'server': 'VantageInternational-Live 3',
 }
 
 # 交易配置
