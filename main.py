@@ -1,11 +1,13 @@
 """
-高级量化交易机器人 - 主程序
-整合所有模块,协调运行
+高级量化交易机器人 - 主程序（终极版）
+支持：实盘交易 + 按月份历史回测模式
 """
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
 import sys
+import MetaTrader5 as mt5  # 必须导入，用于回测直接调用
 
 # 导入所有模块
 from config import *
@@ -19,7 +21,7 @@ class TradingBot:
     
     def __init__(self):
         print("\n" + "="*70)
-        print("🤖 高级量化交易机器人 v2.0")
+        print("🤖 高级量化交易机器人 v2.0 - 终极版")
         print("="*70)
         
         # 初始化各个模块
@@ -29,19 +31,38 @@ class TradingBot:
         self.trade_count = 0
         
     def start(self):
-        """启动机器人"""
-        # 连接MT5
-        print("\n🔌 正在连接MT5...")
-        if not self.mt5.connect(MT5_CONFIG):
-            print("❌ 无法连接MT5,程序退出")
-            return False
+        """启动机器人 - 模式选择"""
+        print("\n请选择运行模式:")
+        print("   1. 实盘交易模式")
+        print("   2. 历史回测模式（按月份回测）")
+        mode = input("\n请输入 1 或 2（默认1）: ").strip()
         
-        # 显示配置信息
-        self.show_config()
-        
-        # 开始主循环
-        self.is_running = True
-        self.main_loop()
+        if mode == "2":
+            # 输入回测月份
+            default_month = (datetime.now().replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
+            month_str = input(f"回测哪个月份？（格式 YYYY-MM，默认上个月 {default_month}）: ").strip()
+            if not month_str:
+                month_str = default_month
+            try:
+                year = int(month_str.split('-')[0])
+                month = int(month_str.split('-')[1])
+            except:
+                print("格式错误，使用默认上个月")
+                year, month = datetime.now().year, datetime.now().month - 1
+                if month == 0:
+                    month = 12
+                    year -= 1
+            self.backtest_month(year, month)
+        else:
+            # 实盘模式
+            print("\n🔌 正在连接MT5实盘...")
+            if not self.mt5.connect(MT5_CONFIG):
+                print("❌ 无法连接MT5,程序退出")
+                return False
+            
+            self.show_config()
+            self.is_running = True
+            self.main_loop()
         
         return True
     
@@ -56,227 +77,238 @@ class TradingBot:
         print(f"最大持仓: {TRADING_CONFIG['max_positions']}")
         print(f"止损距离: {STRATEGY_PARAMS['atr_multiplier_sl']} × ATR")
         print(f"止盈距离: {STRATEGY_PARAMS['atr_multiplier_tp']} × ATR")
-        print(f"盈亏比: 1:{RISK_CONFIG['take_profit_ratio']}")
         print(f"移动止损: {'启用' if RISK_CONFIG['trailing_stop'] else '禁用'}")
-        print("\n💡 策略:")
-        print("  1. 趋势跟踪 (EMA排列)")
-        print("  2. 均值回归 (RSI超买超卖)")
-        print("  3. 突破策略 (布林带突破)")
-        print("  4. 动量策略 (价格动量)")
-        print(f"\n✅ 信号阈值: 至少{STRATEGY_PARAMS['signal_threshold_buy']}个策略同意")
+        print(f"信号阈值: 至少{STRATEGY_PARAMS['signal_threshold_buy']}个策略同意")
+        if STRATEGY_PARAMS.get('enable_vol_filter'):
+            print("震荡市休眠: 启用（低波动自动0单）")
         print("\n⚠️  按 Ctrl+C 停止机器人")
         print("="*70 + "\n")
     
     def main_loop(self):
-        """主运行循环"""
+        """实盘主运行循环"""
         try:
             while self.is_running:
-                # 1. 获取账户信息
                 account = self.mt5.get_account_info()
                 if not account:
-                    print("❌ 获取账户信息失败")
+                    print("❌ 获取账户信息失败，60秒后重试...")
                     time.sleep(60)
                     continue
                 
-                # 2. 检查风险限制
                 if self.check_risk_limits(account['balance']):
-                    print("⚠️  达到风险限制,停止交易")
+                    print("⚠️  达到风险限制，机器人自动停止")
                     break
                 
-                # 3. 获取历史数据
                 df = self.mt5.get_historical_data(bars=500)
                 if df is None:
+                    print("❌ 获取K线数据失败，60秒后重试...")
                     time.sleep(60)
                     continue
                 
-                # 4. 计算技术指标
                 df = TechnicalIndicators.calculate_all_indicators(df, STRATEGY_PARAMS)
                 
-                # 5. 生成交易信号
                 signal, strategy_votes = TradingStrategies.generate_combined_signal(df, STRATEGY_PARAMS)
                 
-                # 6. 显示当前状态
                 self.display_status(df, signal, strategy_votes, account)
                 
-                # 7. 管理现有持仓
                 self.manage_positions(df)
                 
-                # 8. 执行新交易
-                if signal != 0:
+                if signal != 0 and len(self.mt5.get_positions()) < TRADING_CONFIG['max_positions']:
                     self.execute_trade(signal, df, account['balance'])
                 
-                # 9. 等待下一个周期
-                print(f"\n⏳ 等待60秒...")
+                print(f"\n⏳ 等待60秒下一根K线...")
                 print("-"*70)
                 time.sleep(60)
                 
         except KeyboardInterrupt:
             self.stop()
     
-    def check_risk_limits(self, balance):
-        """检查风险限制"""
-        # 检查日亏损
-        if self.risk_manager.check_daily_loss_limit(balance):
-            return True
+    def backtest_month(self, year, month):
+        """按月份历史回测（本金1000U）"""
+        print(f"\n🚀 开始历史回测 - {year}年{month}月 {TRADING_CONFIG['symbol']} 15分钟数据（本金 $1000）")
         
-        # 检查最大回撤
-        if self.risk_manager.check_max_drawdown(balance):
-            return True
-        
-        return False
-    
-    def display_status(self, df, signal, strategy_votes, account):
-        """显示当前状态"""
-        latest = df.iloc[-1]
-        
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
-        print(f"{'='*70}")
-        
-        # 账户信息
-        print(f"💰 账户状态:")
-        print(f"   余额: ${account['balance']:.2f} | 净值: ${account['equity']:.2f} | 浮盈: ${account['profit']:.2f}")
-        
-        # 价格和指标
-        print(f"\n📊 市场数据:")
-        print(f"   价格: {latest['close']:.2f}")
-        print(f"   RSI: {latest['RSI']:.1f}")
-        print(f"   MACD: {latest['MACD_hist']:.4f}")
-        print(f"   ATR: {latest['ATR']:.2f}")
-        
-        # 策略投票
-        print(f"\n🗳️  策略投票:")
-        for strategy, vote in strategy_votes.items():
-            emoji = "📈" if vote == "买入" else "📉" if vote == "卖出" else "➖"
-            print(f"   {emoji} {strategy}: {vote}")
-        
-        # 最终信号
-        signal_str = "🟢 买入信号" if signal == 1 else "🔴 卖出信号" if signal == -1 else "⚪ 无信号"
-        print(f"\n{signal_str}")
-        
-        # 风险摘要
-        risk_summary = self.risk_manager.get_risk_summary(account['balance'])
-        print(f"\n📉 风险状态:")
-        print(f"   当日盈亏: ${risk_summary['daily_pnl']:.2f} ({risk_summary['daily_pnl_pct']:.2f}%)")
-        print(f"   当前回撤: ${risk_summary['drawdown']:.2f} ({risk_summary['drawdown_pct']:.2f}%)")
-        
-        # 持仓信息
-        positions = self.mt5.get_positions()
-        if positions:
-            print(f"\n📌 当前持仓:")
-            for pos in positions:
-                pos_type = "买入" if pos.type == 0 else "卖出"
-                print(f"   {pos_type} | 手数: {pos.volume} | 盈亏: ${pos.profit:.2f}")
-        else:
-            print(f"\n📌 当前无持仓")
-    
-    def execute_trade(self, signal, df, balance):
-        """执行交易"""
-        latest = df.iloc[-1]
-        price_info = self.mt5.get_current_price()
-        
-        if not price_info:
+        # 连接MT5
+        print("正在连接MT5获取历史数据...")
+        if not self.mt5.connect(MT5_CONFIG):
+            print("❌ 连接失败！请确认MT5已打开并登录")
             return
         
-        # 确定价格
-        if signal == 1:
-            price = price_info['ask']
+        # 时间范围：该月1日 00:00 到下月1日 00:00
+        from_date = datetime(year, month, 1)
+        # 下个月1日
+        if month == 12:
+            to_date = datetime(year + 1, 1, 1)
         else:
-            price = price_info['bid']
+            to_date = datetime(year, month + 1, 1)
         
-        # 计算手数
-        lot_size = self.risk_manager.calculate_position_size(
-            balance=balance,
-            atr=latest['ATR'],
-            price=price,
-            risk_per_trade=TRADING_CONFIG['risk_per_trade'],
-            atr_multiplier=STRATEGY_PARAMS['atr_multiplier_sl']
+        print(f"正在下载 {year}-{month:02d} 月历史数据...")
+        rates = mt5.copy_rates_range(
+            TRADING_CONFIG['symbol'],
+            self.mt5.timeframe,
+            from_date,
+            to_date
         )
         
-        # 计算止损止盈
-        sl, tp = self.risk_manager.calculate_stop_loss_take_profit(
-            signal=signal,
-            price=price,
-            atr=latest['ATR'],
-            config=STRATEGY_PARAMS
-        )
+        self.mt5.disconnect()
         
-        # 开仓
+        if rates is None or len(rates) == 0:
+            print("❌ 获取该月数据失败！")
+            print("可能原因：该月数据未加载 → 开XAUUSD M15图表，拉到该月下载")
+            return
+        
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        print(f"✅ 成功加载 {len(df):,} 根K线（{year}年{month}月数据）")
+        
+        initial_balance = 200.0
+        balance = initial_balance
+        positions = []
+        trade_count = 0
+        wins = 0
+        
+        print("\n开始模拟该月交易...\n")
+        
+        for i in range(300, len(df)):
+            current_df = df.iloc[:i+1].copy()
+            current_df = TechnicalIndicators.calculate_all_indicators(current_df, STRATEGY_PARAMS)
+            latest = current_df.iloc[-1]
+            
+            signal, _ = TradingStrategies.generate_combined_signal(current_df, STRATEGY_PARAMS)
+            
+            # 持仓管理和平仓
+            for pos in positions[:]:
+                profit_points = (latest['close'] - pos['entry']) * (1 if pos['direction'] == 1 else -1)
+                profit = profit_points * pos['lot'] * 100
+                
+                if pos['direction'] == 1:
+                    if latest['close'] >= pos['tp']:
+                        balance += profit
+                        wins += 1
+                        positions.remove(pos)
+                    elif latest['close'] <= pos['sl']:
+                        loss = (pos['entry'] - pos['sl']) * pos['lot'] * 100
+                        balance -= loss
+                        positions.remove(pos)
+                else:
+                    if latest['close'] <= pos['tp']:
+                        balance += profit
+                        wins += 1
+                        positions.remove(pos)
+                    elif latest['close'] >= pos['sl']:
+                        loss = (pos['sl'] - pos['entry']) * pos['lot'] * 100
+                        balance -= loss
+                        positions.remove(pos)
+            
+            # 开仓
+            if signal != 0 and len(positions) < TRADING_CONFIG['max_positions']:
+                lot = self.risk_manager.calculate_position_size(
+                    balance, latest['ATR'], latest['close'], 
+                    TRADING_CONFIG['risk_per_trade'], STRATEGY_PARAMS['atr_multiplier_sl']
+                )
+                sl, tp = self.risk_manager.calculate_stop_loss_take_profit(
+                    signal, latest['close'], latest['ATR'], STRATEGY_PARAMS
+                )
+                positions.append({
+                    'direction': signal,
+                    'entry': latest['close'],
+                    'lot': lot,
+                    'sl': sl,
+                    'tp': tp
+                })
+                trade_count += 1
+        
+        # 输出结果
+        print("\n" + "="*70)
+        print(f"📊 {year}年{month}月回测完成！")
+        print("="*70)
+        print(f"交易笔数: {trade_count} 笔")
+        if trade_count > 0:
+            print(f"胜率: {wins/trade_count*100:.1f}%")
+        print(f"初始本金: ${initial_balance:,.2f}")
+        print(f"最终本金: ${balance:,.2f}")
+        print(f"该月收益: {((balance/initial_balance)-1)*100:.2f}%")
+        print("="*70)
+    
+    def check_risk_limits(self, balance):
+        return self.risk_manager.check_daily_loss_limit(balance) or \
+               self.risk_manager.check_max_drawdown(balance)
+    
+    def display_status(self, df, signal, strategy_votes, account):
+        latest = df.iloc[-1]
+        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]")
+        print("="*70)
+        print(f"💰 账户: 余额 ${account['balance']:.2f} | 净值 ${account['equity']:.2f} | 浮盈 ${account['profit']:.2f}")
+        print(f"📊 价格: {latest['close']:.2f} | RSI {latest['RSI']:.1f} | ATR {latest['ATR']:.2f}")
+        print(f"\n🗳️ 策略投票:")
+        for name, vote in strategy_votes.items():
+            emoji = "📈" if "买入" in vote else "📉" if "卖出" in vote else "🛌" if "休眠" in vote else "➖"
+            print(f"   {emoji} {name}: {vote}")
+        signal_text = "🟢 买入" if signal == 1 else "🔴 卖出" if signal == -1 else "⚪ 无信号"
+        print(f"\n{signal_text}")
+        positions = self.mt5.get_positions()
+        print(f"📌 持仓: {len(positions)} 张" if positions else "📌 当前无持仓")
+    
+    def execute_trade(self, signal, df, balance):
+        latest = df.iloc[-1]
+        price_info = self.mt5.get_current_price()
+        if not price_info: return
+        
+        price = price_info['ask'] if signal == 1 else price_info['bid']
+        lot_size = self.risk_manager.calculate_position_size(balance, latest['ATR'], price,
+                                                            TRADING_CONFIG['risk_per_trade'],
+                                                            STRATEGY_PARAMS['atr_multiplier_sl'])
+        sl, tp = self.risk_manager.calculate_stop_loss_take_profit(signal, price, latest['ATR'], STRATEGY_PARAMS)
+        
         if self.mt5.open_position(signal, price, lot_size, sl, tp):
             self.trade_count += 1
             self.risk_manager.daily_trades += 1
     
     def manage_positions(self, df):
-        """管理持仓"""
         positions = self.mt5.get_positions()
-        if not positions:
-            return
+        if not positions: return
         
         latest = df.iloc[-1]
         price_info = self.mt5.get_current_price()
-        
-        if not price_info:
-            return
+        if not price_info: return
         
         for position in positions:
             pos_type = 'LONG' if position.type == 0 else 'SHORT'
             current_price = price_info['bid'] if pos_type == 'LONG' else price_info['ask']
             
-            # 检查是否应该移至盈亏平衡
-            if self.risk_manager.should_move_to_breakeven(
-                pos_type, position.price_open, current_price, latest['ATR']
-            ):
+            if self.risk_manager.should_move_to_breakeven(pos_type, position.price_open, current_price, latest['ATR']):
                 self.mt5.modify_position(position, position.price_open, position.tp)
                 print(f"✅ 移至盈亏平衡: {position.price_open:.2f}")
             
-            # 检查移动止损
             elif RISK_CONFIG['trailing_stop']:
-                new_sl = self.risk_manager.calculate_trailing_stop(
-                    pos_type, position.price_open, current_price, position.sl, latest['ATR']
-                )
+                new_sl = self.risk_manager.calculate_trailing_stop(pos_type, position.price_open, current_price, position.sl, latest['ATR'])
                 if new_sl:
                     self.mt5.modify_position(position, new_sl, position.tp)
+                    print(f"✅ 移动止损更新: {new_sl:.2f}")
     
     def stop(self):
-        """停止机器人"""
         print("\n\n⚠️  收到停止信号...")
         self.is_running = False
-        
-        # 显示统计
-        print(f"\n📊 交易统计:")
-        print(f"   总交易次数: {self.trade_count}")
-        
-        # 询问是否关闭持仓
+        print(f"\n📊 今日交易统计: {self.trade_count} 笔")
         positions = self.mt5.get_positions()
         if positions:
-            response = input(f"\n当前有 {len(positions)} 个持仓,是否关闭? (y/n): ")
+            response = input(f"\n当前有 {len(positions)} 张持仓，是否全部平仓？(y/n): ")
             if response.lower() == 'y':
                 self.mt5.close_all_positions()
-        
-        # 断开连接
+                print("✅ 所有持仓已平")
         self.mt5.disconnect()
-        print("\n✅ 机器人已停止")
-
+        print("\n✅ 机器人已安全停止")
 
 # ==================== 主程序入口 ====================
 if __name__ == "__main__":
     print("""
 ╔════════════════════════════════════════════════════════════════════╗
-║                                                                    ║
-║            💎 高级量化交易机器人 v2.0                              ║
-║            Professional Quantitative Trading System                ║
-║                                                                    ║
+║            💎 高级量化交易机器人 v2.0 - 终极版                    ║
+║            支持实盘交易 + 按月份历史回测                          ║
 ╚════════════════════════════════════════════════════════════════════╝
 
-📦 模块加载:
-   ✓ config.py         - 配置管理
-   ✓ indicators.py     - 技术指标
-   ✓ strategies.py     - 交易策略
-   ✓ risk_manager.py   - 风险管理
-   ✓ mt5_connector.py  - MT5连接
+📦 模块加载完成
 
 🚀 正在启动...
 """)
     
-    # 创建并启动机器人
     bot = TradingBot()
     bot.start()
