@@ -84,9 +84,9 @@ class TechnicalIndicators:
         high = df['high']
         low = df['low']
         
-        # 趋势指标 - 升级为更快EMA10/30/100
-        df['EMA_10'] = TechnicalIndicators.calculate_ema(close, params['ema_short'])   # 10
-        df['EMA_30'] = TechnicalIndicators.calculate_ema(close, params['ema_medium']) # 30
+        # 趋势指标 - 升级为更快EM8/21/100
+        df['EMA_8'] = TechnicalIndicators.calculate_ema(close, params['ema_short'])   # 8
+        df['EMA_21'] = TechnicalIndicators.calculate_ema(close, params['ema_medium']) # 21
         df['EMA_100'] = TechnicalIndicators.calculate_ema(close, params['ema_long'])  # 100
         
         # RSI

@@ -21,9 +21,9 @@ TRADING_CONFIG = {
 
 # 策略参数 —— 赚钱更快版（实盘推荐）
 STRATEGY_PARAMS = {
-    'ema_short': 12,       # 更快反应趋势
-    'ema_medium': 35,
-    'ema_long': 120,
+    'ema_short': 8,       # 更快反应趋势
+    'ema_medium': 21,
+    'ema_long': 100,
     'rsi_period': 14,
     'rsi_oversold': 38,    # 更容易触发抄底
     'rsi_overbought': 62,  # 更容易触发逃顶
@@ -33,7 +33,7 @@ STRATEGY_PARAMS = {
     'bb_period': 20,
     'bb_std': 1.8,         # 布林带更敏感，更快突破
     'atr_period': 14,
-    'atr_multiplier_sl': 1.5,   # 止损稍紧（更快止损，减少小亏）
+    'atr_multiplier_sl': 1.2,   # 止损稍紧（更快止损，减少小亏）
     'atr_multiplier_tp': 5.5,   # 止盈拉到5倍，吃更大肉
     'signal_threshold_buy': 2,  # 保持2票！这是稳的核心，别改1
     'signal_threshold_sell': -2,

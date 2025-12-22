@@ -11,11 +11,11 @@ class TradingStrategies:
         """策略1: 趋势跟踪 - 更快反应（EMA10/30/100）"""
         latest = df.iloc[-1]
         
-        if (latest['EMA_10'] > latest['EMA_30'] > latest['EMA_100'] and
+        if (latest['EMA_8'] > latest['EMA_21'] > latest['EMA_100'] and
             latest['RSI'] < params['rsi_overbought'] and 
             latest['MACD_hist'] > 0):
             return 1
-        elif (latest['EMA_10'] < latest['EMA_30'] < latest['EMA_100'] and
+        elif (latest['EMA_8'] < latest['EMA_21'] < latest['EMA_100'] and
               latest['RSI'] > params['rsi_oversold'] and 
               latest['MACD_hist'] < 0):
             return -1
