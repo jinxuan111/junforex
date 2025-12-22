@@ -1,6 +1,6 @@
 """
-技术指标计算模块
-包含所有常用技术指标
+技术指标计算模块 - 顶级量化升级版
+支持更快EMA + 所有策略所需指标
 """
 
 import pandas as pd
@@ -21,11 +21,7 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_rsi(data, period=14):
-        """
-        计算RSI(相对强弱指标)
-        RSI > 70: 超买
-        RSI < 30: 超卖
-        """
+        """计算RSI"""
         delta = data.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -35,10 +31,7 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_macd(data, fast=12, slow=26, signal=9):
-        """
-        计算MACD指标
-        返回: MACD线, 信号线, 柱状图
-        """
+        """计算MACD"""
         exp1 = data.ewm(span=fast, adjust=False).mean()
         exp2 = data.ewm(span=slow, adjust=False).mean()
         macd = exp1 - exp2
@@ -48,10 +41,7 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_bollinger_bands(data, period=20, std=2):
-        """
-        计算布林带
-        返回: 上轨, 中轨, 下轨
-        """
+        """计算布林带"""
         middle = data.rolling(window=period).mean()
         std_dev = data.rolling(window=period).std()
         upper = middle + (std_dev * std)
@@ -60,10 +50,7 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_atr(high, low, close, period=14):
-        """
-        计算ATR(真实波幅)
-        用于衡量市场波动率
-        """
+        """计算ATR"""
         tr = np.maximum(
             high - low,
             np.maximum(
@@ -81,11 +68,7 @@ class TechnicalIndicators:
     
     @staticmethod
     def calculate_stochastic(high, low, close, k_period=14, d_period=3):
-        """
-        计算随机指标(KD指标)
-        K > D 且 K < 80: 看涨
-        K < D 且 K > 20: 看跌
-        """
+        """计算随机指标(KD)"""
         lowest_low = low.rolling(window=k_period).min()
         highest_high = high.rolling(window=k_period).max()
         k = 100 * (close - lowest_low) / (highest_high - lowest_low)
@@ -95,18 +78,16 @@ class TechnicalIndicators:
     @staticmethod
     def calculate_all_indicators(df, params):
         """
-        一次性计算所有指标
-        输入: DataFrame, 参数字典
-        返回: 添加了所有指标的DataFrame
+        一次性计算所有指标（升级版支持更快EMA）
         """
         close = df['close']
         high = df['high']
         low = df['low']
         
-        # 趋势指标
-        df['EMA_20'] = TechnicalIndicators.calculate_ema(close, params['ema_short'])
-        df['EMA_50'] = TechnicalIndicators.calculate_ema(close, params['ema_medium'])
-        df['EMA_200'] = TechnicalIndicators.calculate_ema(close, params['ema_long'])
+        # 趋势指标 - 升级为更快EMA10/30/100
+        df['EMA_10'] = TechnicalIndicators.calculate_ema(close, params['ema_short'])   # 10
+        df['EMA_30'] = TechnicalIndicators.calculate_ema(close, params['ema_medium']) # 30
+        df['EMA_100'] = TechnicalIndicators.calculate_ema(close, params['ema_long'])  # 100
         
         # RSI
         df['RSI'] = TechnicalIndicators.calculate_rsi(close, params['rsi_period'])
