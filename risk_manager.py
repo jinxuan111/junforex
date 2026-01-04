@@ -1,6 +1,7 @@
 """
 风险管理模块
 负责仓位计算、止损止盈、风险控制
+已加入动态止损止盈倍数（根据波动率自适应）
 """
 
 class RiskManager:
@@ -19,15 +20,6 @@ class RiskManager:
         
         公式:
         手数 = 风险金额 / (止损距离 × 点值)
-        
-        参数:
-        - balance: 账户余额
-        - atr: 当前ATR值
-        - price: 当前价格
-        - risk_per_trade: 风险比例(如0.02 = 2%)
-        - atr_multiplier: ATR倍数(如2 = 2倍ATR作为止损)
-        
-        返回: 手数(保留2位小数)
         """
         # 风险金额
         risk_amount = balance * risk_per_trade
@@ -35,8 +27,7 @@ class RiskManager:
         # 止损距离(点数)
         stop_distance = atr * atr_multiplier
         
-        # 黄金: 1手 = 100盎司
-        # 每点价值 = 100美元
+        # 黄金: 1手 = 100盎司，每点价值 = 100美元
         point_value = 100
         
         # 计算手数
@@ -54,18 +45,7 @@ class RiskManager:
     
     def calculate_stop_loss_take_profit(self, signal, price, atr, config):
         """
-        计算止损和止盈价格
-        
-        止损 = 价格 ± (ATR × 止损倍数)
-        止盈 = 价格 ± (ATR × 止盈倍数)
-        
-        参数:
-        - signal: 1=买入, -1=卖出
-        - price: 开仓价格
-        - atr: ATR值
-        - config: 策略参数
-        
-        返回: (止损价格, 止盈价格)
+        计算止损和止盈价格（兼容旧调用）
         """
         atr_sl = config['atr_multiplier_sl'] * atr
         atr_tp = config['atr_multiplier_tp'] * atr
@@ -78,13 +58,35 @@ class RiskManager:
             tp = price - atr_tp
         
         return sl, tp
+
+    def get_dynamic_multipliers(self, df, params):
+        """
+        新增：动态计算止损止盈倍数（根据当前波动率自适应）
+        """
+        latest = df.iloc[-1]
+        atr = latest['ATR']
+        atr_mean = df['ATR'].iloc[-20:].mean()  # 过去20根平均ATR
+        volatility_ratio = atr / atr_mean if atr_mean > 0 else 1.0  # 当前波动/平均波动
+
+        # 基础倍数
+        base_sl = params['atr_multiplier_sl']  # 1.2
+        base_tp = params['atr_multiplier_tp']  # 5.5
+
+        # 动态调整
+        if volatility_ratio > 1.3:  # 高波动（大行情）
+            sl_multiplier = base_sl * 1.5  # 止损松到1.8，扛回调
+            tp_multiplier = base_tp * 1.3  # 止盈远到7.15，吃大肉
+        elif volatility_ratio < 0.8:  # 低波动（假期/震荡）
+            sl_multiplier = base_sl * 0.8  # 止损紧到0.96，亏少
+            tp_multiplier = base_tp * 0.8  # 止盈近到4.4，快出局
+        else:
+            sl_multiplier = base_sl
+            tp_multiplier = base_tp
+
+        return sl_multiplier, tp_multiplier
     
     def check_daily_loss_limit(self, current_balance):
-        """
-        检查是否超过日亏损限制
-        
-        如果当日亏损超过5%,返回True(停止交易)
-        """
+        """检查是否超过日亏损限制"""
         if self.start_balance == 0:
             self.start_balance = current_balance
             return False
@@ -98,12 +100,7 @@ class RiskManager:
         return False
     
     def check_max_drawdown(self, current_balance):
-        """
-        检查最大回撤
-        
-        回撤 = (峰值 - 当前) / 峰值
-        如果回撤超过15%,返回True(停止交易)
-        """
+        """检查最大回撤"""
         if current_balance > self.peak_balance:
             self.peak_balance = current_balance
         
@@ -119,19 +116,7 @@ class RiskManager:
         return False
     
     def should_move_to_breakeven(self, position_type, entry_price, current_price, atr):
-        """
-        判断是否应该移至盈亏平衡
-        
-        当盈利达到1倍ATR时,将止损移至开仓价(保本)
-        
-        参数:
-        - position_type: 'LONG' 或 'SHORT'
-        - entry_price: 开仓价
-        - current_price: 当前价
-        - atr: ATR值
-        
-        返回: True/False
-        """
+        """判断是否移至盈亏平衡"""
         if position_type == 'LONG':
             profit = current_price - entry_price
             if profit >= self.config['break_even_trigger'] * atr:
@@ -144,28 +129,13 @@ class RiskManager:
         return False
     
     def calculate_trailing_stop(self, position_type, entry_price, current_price, current_sl, atr):
-        """
-        计算移动止损
-        
-        当盈利超过1.5倍ATR时,止损跟随价格移动
-        新止损 = 当前价 - 1.5倍ATR
-        
-        参数:
-        - position_type: 'LONG' 或 'SHORT'
-        - entry_price: 开仓价
-        - current_price: 当前价
-        - current_sl: 当前止损价
-        - atr: ATR值
-        
-        返回: 新止损价格(如果需要调整)
-        """
+        """计算移动止损"""
         min_profit = self.config['min_profit_move_sl'] * atr
         
         if position_type == 'LONG':
             profit = current_price - entry_price
             if profit > min_profit:
                 new_sl = current_price - (1.5 * atr)
-                # 只能向上移动止损
                 if new_sl > current_sl:
                     return new_sl
         
@@ -173,18 +143,13 @@ class RiskManager:
             profit = entry_price - current_price
             if profit > min_profit:
                 new_sl = current_price + (1.5 * atr)
-                # 只能向下移动止损
                 if new_sl < current_sl:
                     return new_sl
         
         return None
     
     def get_risk_summary(self, balance):
-        """
-        获取风险摘要
-        
-        返回当前风险状态
-        """
+        """获取风险摘要"""
         if self.start_balance == 0:
             daily_pnl_pct = 0
         else:

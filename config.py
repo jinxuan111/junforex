@@ -34,12 +34,13 @@ STRATEGY_PARAMS = {
     'bb_std': 1.8,         # 布林带更敏感，更快突破
     'atr_period': 14,
     'atr_multiplier_sl': 1.2,   # 止损稍紧（更快止损，减少小亏）
-    'atr_multiplier_tp': 5.5,   # 止盈拉到5倍，吃更大肉
+    'atr_multiplier_tp': 5.0,   # 止盈拉到5倍，吃更大肉
     'signal_threshold_buy': 2,  # 保持2票！这是稳的核心，别改1
     'signal_threshold_sell': -2,
-    'enable_vol_filter': True,  # 保持休眠，稳！
+    'enable_vol_filter': True,  # 保持休眠，稳！ 
     'vol_period': 10,
-    'vol_threshold': 0.45,     # 稍微放宽一点，让更多行情进场
+    'vol_threshold': 0.45,   # 稍微放宽一点，让更多行情进场
+
 }
 
 # 风控配置 —— 稍微进攻一点但仍稳
