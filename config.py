@@ -16,7 +16,7 @@ TRADING_CONFIG = {
     'timeframe':15,
     'risk_per_trade': 0.025,      # 每笔只风险 2.5%（原来1.5%太保守）
     'magic_number': 123456,
-    'max_positions': 1,           # 100U账户最多同时只开1单！！！
+    'max_positions': 2,           # 100U账户最多同时只开1单！！！
 }
 
 # 策略参数 —— 赚钱更快版（实盘推荐）
@@ -50,7 +50,7 @@ RISK_CONFIG = {
     'take_profit_ratio': 1.5,
     'trailing_stop': True,
     'break_even_trigger': 0.6,    # 更快保本
-    'min_profit_move_sl': 1.0,    # 更快启动移动止损
+   'trailing_stop': False,
 }
 
 # 日志配置

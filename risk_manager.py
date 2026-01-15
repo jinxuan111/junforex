@@ -14,24 +14,15 @@ class RiskManager:
         self.peak_balance = 0
         self.daily_trades = 0
     
-    def calculate_position_size(self, balance, atr, price, risk_per_trade, atr_multiplier):
+    def calculate_position_size(self, balance):
         """
-        计算交易手数
-        
-        公式:
-        手数 = 风险金额 / (止损距离 × 点值)
+        计算交易手数（根据余额每100U开0.01手）
+        100U → 0.01手
+        200U → 0.02手
+        1000U → 0.10手
         """
-        # 风险金额
-        risk_amount = balance * risk_per_trade
-        
-        # 止损距离(点数)
-        stop_distance = atr * atr_multiplier
-        
-        # 黄金: 1手 = 100盎司，每点价值 = 100美元
-        point_value = 100
-        
-        # 计算手数
-        lot_size = risk_amount / (stop_distance * point_value)
+        # 每100U开0.01手
+        lot_size = (balance / 100) * 0.01
         
         # 限制手数范围
         min_lot = 0.01
@@ -42,7 +33,7 @@ class RiskManager:
         lot_size = round(lot_size, 2)
         
         return lot_size
-    
+
     def calculate_stop_loss_take_profit(self, signal, price, atr, config):
         """
         计算止损和止盈价格（兼容旧调用）
@@ -59,31 +50,7 @@ class RiskManager:
         
         return sl, tp
 
-    def get_dynamic_multipliers(self, df, params):
-        """
-        新增：动态计算止损止盈倍数（根据当前波动率自适应）
-        """
-        latest = df.iloc[-1]
-        atr = latest['ATR']
-        atr_mean = df['ATR'].iloc[-20:].mean()  # 过去20根平均ATR
-        volatility_ratio = atr / atr_mean if atr_mean > 0 else 1.0  # 当前波动/平均波动
-
-        # 基础倍数
-        base_sl = params['atr_multiplier_sl']  # 1.2
-        base_tp = params['atr_multiplier_tp']  # 5.5
-
-        # 动态调整
-        if volatility_ratio > 1.3:  # 高波动（大行情）
-            sl_multiplier = base_sl * 1.5  # 止损松到1.8，扛回调
-            tp_multiplier = base_tp * 1.3  # 止盈远到7.15，吃大肉
-        elif volatility_ratio < 0.8:  # 低波动（假期/震荡）
-            sl_multiplier = base_sl * 0.8  # 止损紧到0.96，亏少
-            tp_multiplier = base_tp * 0.8  # 止盈近到4.4，快出局
-        else:
-            sl_multiplier = base_sl
-            tp_multiplier = base_tp
-
-        return sl_multiplier, tp_multiplier
+  
     
     def check_daily_loss_limit(self, current_balance):
         """检查是否超过日亏损限制"""
@@ -135,14 +102,14 @@ class RiskManager:
         if position_type == 'LONG':
             profit = current_price - entry_price
             if profit > min_profit:
-                new_sl = current_price - (1.5 * atr)
+                new_sl = current_price - (1.2 * atr)
                 if new_sl > current_sl:
                     return new_sl
         
         else:  # SHORT
             profit = entry_price - current_price
             if profit > min_profit:
-                new_sl = current_price + (1.5 * atr)
+                new_sl = current_price + (1.2 * atr)
                 if new_sl < current_sl:
                     return new_sl
         
