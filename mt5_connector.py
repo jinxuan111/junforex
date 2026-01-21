@@ -157,10 +157,7 @@ class MT5Connector:
         
         返回: True/False
         """
-        # 检查是否已有持仓
-        if self.get_positions():
-            print("⚠️  已有持仓,跳过开仓")
-            return False
+
         
         # 确定订单类型
         if signal == 1:
